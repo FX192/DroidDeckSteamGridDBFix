@@ -478,6 +478,11 @@ jobs:
           python3 tools/release/check_session_assets.py app/build/outputs/apk/release/app-release.apk
           python3 tools/release/runtime_inputs.py apk app/build/outputs/apk/release/app-release.apk
 
+      - name: Show compile errors as annotations
+        if: failure()
+        run: |
+          grep -E '^e: |error:|What went wrong' -A3 /tmp/build.log 2>/dev/null | head -60 | while IFS= read -r l; do echo "::error::${l:0:900}"; done || true
+
       - name: Check the store engines' library
         run: |
           set -euo pipefail
