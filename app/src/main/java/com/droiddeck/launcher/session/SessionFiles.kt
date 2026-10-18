@@ -72,6 +72,10 @@ object SessionFiles {
             "usr/local/bin/droiddeck-open-url" to "usr/local/bin/droiddeck-open-url",
             "usr/local/bin/droiddeck-steam-games" to "usr/local/bin/droiddeck-steam-games",
             "usr/local/bin/droiddeck-pad-defaults" to "usr/local/bin/droiddeck-pad-defaults",
+            "usr/local/bin/droiddeck-steam-x64" to "usr/local/bin/droiddeck-steam-x64",
+            "usr/local/bin/droiddeck-x64-arm-proton" to "usr/local/bin/droiddeck-x64-arm-proton",
+            "usr/local/bin/droiddeck-x64-arm-webhelper" to "usr/local/bin/droiddeck-x64-arm-webhelper",
+            "usr/local/bin/droiddeck-x64-webhelper" to "usr/local/bin/droiddeck-x64-webhelper",
             "usr/local/bin/droiddeck-steamvr" to "usr/local/bin/droiddeck-steamvr",
             "usr/local/bin/droiddeck-steamvr-settings" to "usr/local/bin/droiddeck-steamvr-settings",
             "usr/local/bin/droiddeck-steamvr-game" to "usr/local/bin/droiddeck-steamvr-game",
@@ -194,31 +198,32 @@ object SessionFiles {
             Log.e(TAG, "could not write steam-compatibility-label")
         }
 
-        val startupMovieDir = File(root, "root/.local/share/Steam/config/uioverrides/movies")
         BootMovie.syncFromSteam(context)
         val startupMovie = BootMovie.prepare(context)
-        if (startupMovie == null) {
-            // Nothing to play (a movie whose volume could not be set is never played at another volume), so no earlier copy plays either.
-            for (name in listOf("bigpicture_startup.webm", "steam_os_startup.webm")) {
-                File(startupMovieDir, name).delete()
-                File(startupMovieDir, ".$name.source").delete()
-            }
-        }
-        val bigPictureMovieInstalled = startupMovie != null &&
-            stageStartupMovie(startupMovie, startupMovieDir, "bigpicture_startup.webm")
-        if (startupMovie != null) stageStartupMovie(startupMovie, startupMovieDir, "steam_os_startup.webm")
-        val config = File(root, "root/.local/share/Steam/config/config.vdf")
         val force = SessionPrefs.bootMovieApplyNext(context)
-        if (bigPictureMovieInstalled) {
-            if (ensureStartupMovieDefault(config, force)) {
-                if (force) SessionPrefs.setBootMovieApplyNext(context, false)
-                SessionPrefs.setBootMovieSteamSeen(context, BOOT_MOVIE_PATH)
+        val steamHomes = listOf(File(root, "root/.local/share/Steam")) +
+            listOf(File(root, "root/.droiddeck-x64/.local/share/Steam")).filter { File(it, "config").isDirectory }
+        var allDone = true
+        var seen: String? = null
+        for ((index, home) in steamHomes.withIndex()) {
+            val movieDir = File(home, "config/uioverrides/movies")
+            val config = File(home, "config/config.vdf")
+            if (startupMovie == null) {
+                // Nothing to play (a movie whose volume could not be set is never played at another volume), so no earlier copy plays either.
+                for (name in listOf("bigpicture_startup.webm", "steam_os_startup.webm")) {
+                    File(movieDir, name).delete()
+                    File(movieDir, ".$name.source").delete()
+                }
             }
-        } else if (resetMissingStartupMovie(config, force)) {
-            // Steam no longer names a movie that is not there; a pending pick is only done once that is so.
-            if (force) SessionPrefs.setBootMovieApplyNext(context, false)
-            SessionPrefs.setBootMovieSteamSeen(context, "")
+            val bigPictureMovieInstalled = startupMovie != null && stageStartupMovie(startupMovie, movieDir, "bigpicture_startup.webm")
+            if (startupMovie != null) stageStartupMovie(startupMovie, movieDir, "steam_os_startup.webm")
+            val done = if (bigPictureMovieInstalled) ensureStartupMovieDefault(config, force) else resetMissingStartupMovie(config, force)
+            if (!done) allDone = false
+            if (index == 0 && done) seen = if (bigPictureMovieInstalled) BOOT_MOVIE_PATH else ""
         }
+        // A pick made in the app is done once every Steam client's config has it, or no longer names a missing movie.
+        if (force && allDone) SessionPrefs.setBootMovieApplyNext(context, false)
+        seen?.let { SessionPrefs.setBootMovieSteamSeen(context, it) }
     }
 
     /**

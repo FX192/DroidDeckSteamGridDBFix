@@ -2311,6 +2311,17 @@
     <string name="stores_sync_gog_unreachable">เชื่อมต่อกับ GOG ไม่ได้</string>
     <string name="stores_sync_gog_unreadable">ไม่สามารถอ่านคลังเกม GOG ของคุณได้</string>
     <string name="stores_registering">กำลังลงทะเบียนกับ Steam…</string>
+    <string name="mode_client_arch">ไคลเอนต์ Steam</string>
+    <string name="mode_client_arch_fex">FEX %1$s</string>
+    <string name="mode_client_arch_arm64">ARM64</string>
+    <string name="mode_client_arch_x64">x86-64</string>
+    <string name="setup_vac_diag">การวินิจฉัย VAC</string>
+    <string name="setup_vac_diag_hint">เกม Source บันทึกคอนโซลของเกม (-condebug); vac.txt ในล็อกเซสชันบอกว่าปลอดภัยหรือไม่</string>
+    <string name="load_starting_steam_x64">กำลังเริ่ม Steam x86-64</string>
+    <string name="storage_game_x64">%1$s · x86-64</string>
+    <string name="storage_tool_x64_client">ใช้โดยไคลเอนต์ Steam x86-64</string>
+    <string name="storage_uninstall_in_x64">สำเนานี้อยู่ในไคลเอนต์ Steam x86-64 เลือก x86-64 ในไคลเอนต์ Steam แล้วถอนการติดตั้งที่นี่</string>
+    <string name="storage_uninstall_in_arm64">สำเนานี้อยู่ในไคลเอนต์ Steam ARM64 เลือก ARM64 ในไคลเอนต์ Steam แล้วถอนการติดตั้งที่นี่</string>
     <string name="drawer_page_glasses">แว่นตา</string>
     <string name="glasses_open">แว่นตา VITURE</string>
     <string name="glasses_control">การควบคุมแว่นตา</string>
@@ -2659,7 +2670,7 @@
     <string name="boot_movie_volume">ระดับเสียง</string>
     <string name="boot_movie_length">ความยาว</string>
     <string name="boot_movie_seconds">%1$d วิ</string>
-    <string name="boot_movie_length_hint">จำนวนวินาทีของวิดีโอที่จะเล่น วิดีโอที่ยาวกว่านี้จะถูกตัดจากท้าย</string>
+    <string name="boot_movie_length_hint">จำนวนวินาทีของภาพยนตร์ที่จะเล่น ส่วนที่ยาวเกินกว่านั้นจะถูกตัดออกที่ท้าย</string>
     <string name="boot_movie_repo_search">ค้นหาใน SteamDeckRepo</string>
     <string name="boot_movie_repo_all">ทุกอุปกรณ์</string>
     <string name="boot_movie_repo_deck">Steam Deck</string>
