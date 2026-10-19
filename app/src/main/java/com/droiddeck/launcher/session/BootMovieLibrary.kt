@@ -44,7 +44,8 @@ object BootMovieLibrary {
 
     internal fun steamRoot(context: Context) = File(LinuxRuntime.rootDir(context), "root/.local/share/Steam")
 
-    internal fun steamConfig(context: Context) = File(LinuxRuntime.rootDir(context), "root/.local/share/Steam/config/config.vdf")
+    /** The running (else selected) Steam client's config, the one whose startup movie choice is read and recorded. */
+    internal fun steamConfig(context: Context) = File(SessionPrefs.activeSteamRoot(context), "config/config.vdf")
 
     private fun thumbsDir(context: Context) = File(context.filesDir, "boot-movie/thumbs")
 
@@ -332,20 +333,50 @@ object BootMovieLibrary {
         }
     }
 
+    /** The first frame that is not nearly black out of several taken through the movie, else the brightest; a movie may open dark. */
+    private fun brightestFrame(retriever: MediaMetadataRetriever, durationMs: Long): Bitmap? {
+        var best: Bitmap? = null
+        var bestLuma = -1
+        for (fraction in doubleArrayOf(0.33, 0.5, 0.66, 0.2, 0.8, 0.1, 0.9)) {
+            val frame = runCatching { retriever.getFrameAtTime((durationMs * 1000L * fraction).toLong(), MediaMetadataRetriever.OPTION_CLOSEST) }.getOrNull() ?: continue
+            val luma = averageLuma(frame)
+            if (luma >= MIN_COVER_LUMA) return frame
+            if (luma > bestLuma) { best = frame; bestLuma = luma }
+        }
+        return best ?: runCatching { retriever.frameAtTime }.getOrNull()
+    }
+
+    private fun averageLuma(bitmap: Bitmap): Int {
+        val small = Bitmap.createScaledBitmap(bitmap, 16, 9, true)
+        var sum = 0L
+        for (y in 0 until small.height) for (x in 0 until small.width) {
+            val c = small.getPixel(x, y)
+            sum += (((c shr 16) and 0xFF) * 3 + ((c shr 8) and 0xFF) * 6 + (c and 0xFF)) / 10
+        }
+        return (sum / (small.width * small.height)).toInt()
+    }
+
+    private const val MIN_COVER_LUMA = 24
+
+    /** The picture Steam keeps next to a movie it manages, when there is one. */
+    private fun previewBeside(movie: File): File? =
+        listOf("jpg", "jpeg", "png").map { File(movie.parentFile, movie.nameWithoutExtension + "." + it) }.firstOrNull { it.isFile && it.length() > 0L }
+
     /** A cover for a movie: the picture SteamDeckRepo gave it, or one frame taken from the video and remembered. */
     fun cover(context: Context, entry: Entry): File? {
         val file = fileOf(context, entry) ?: return null
         val name = if (entry.id.startsWith(PREFIX)) file.name else entry.id
         val given = File(thumbsDir(context), coverName(name))
         if (given.isFile && given.length() > 0L) return given
-        val key = "frame-" + safe(name) + "-" + file.length() + "-" + file.lastModified() + ".jpg"
+        if (entry.source == SOURCE_POINTSHOP) previewBeside(file)?.let { return it }
+        val key = "frame-" + safe(name) + "-v2-" + file.length() + "-" + file.lastModified() + ".jpg"
         val frame = File(thumbsDir(context), key)
         if (frame.isFile && frame.length() > 0L) return frame
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(file.path)
             val ms = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            val bitmap = retriever.getFrameAtTime(ms * 1000L / 3, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return null
+            val bitmap = brightestFrame(retriever, ms) ?: return null
             val width = 480
             val scaled = if (bitmap.width > width) Bitmap.createScaledBitmap(bitmap, width, (bitmap.height * width / bitmap.width).coerceAtLeast(1), true) else bitmap
             thumbsDir(context).mkdirs()
