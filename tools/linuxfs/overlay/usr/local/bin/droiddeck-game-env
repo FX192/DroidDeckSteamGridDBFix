@@ -448,6 +448,14 @@ def gl_vsync(env):
     return True
 
 
+def game_images(env):
+    if game_id(env) is None:
+        return False
+    env.setdefault("GAMESCOPE_WSI_MIN_IMAGE_COUNT", "8")
+    env.setdefault("GAMESCOPE_WSI_ENSURE_MIN_IMAGE_COUNT", "1")
+    return True
+
+
 def apply_config(env, config, app_id, fixes=None):
     if config.get("version") != 1:
         raise ValueError("unsupported environment configuration")
@@ -747,6 +755,8 @@ def main():
     if app_id:
         gl_default = gl_vsync(env)
         waiting = len(command) > 1 and command[1] == "waitforexitandrun"
+        if waiting:
+            game_images(env)
         fixes = {}
         if waiting:
             command = skip_red_launcher(command)
