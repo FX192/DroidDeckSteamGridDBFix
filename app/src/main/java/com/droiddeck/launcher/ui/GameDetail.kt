@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -86,7 +87,9 @@ import coil.compose.AsyncImage
 import com.droiddeck.launcher.R
 import com.droiddeck.launcher.frontend.GameRemoval
 import com.droiddeck.launcher.frontend.Library
+import com.droiddeck.launcher.runtime.WowAddons
 import com.droiddeck.launcher.session.GameSaves
+import com.droiddeck.launcher.session.SessionState
 import com.droiddeck.launcher.stores.CatalogItem
 import com.droiddeck.launcher.stores.CloudSaves
 import com.droiddeck.launcher.stores.InstalledStoreGame
@@ -98,6 +101,7 @@ import com.droiddeck.launcher.stores.StoreInstallRoot
 import com.droiddeck.launcher.stores.StoreLanguage
 import com.droiddeck.launcher.stores.StoreSizes
 import com.droiddeck.launcher.stores.StoresState
+import com.droiddeck.launcher.stores.gamejolt.GameJoltApi
 import com.droiddeck.launcher.stores.battlenet.BattleNetInstall
 import com.droiddeck.launcher.stores.download.DownloadQueue
 import com.droiddeck.launcher.stores.download.DownloadState
@@ -115,7 +119,6 @@ import java.io.File
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 
-/** What a game page shows: `app:<appId>` for a game in the library, `[app:]<store>:<id>` for a store product. */
 internal class GameRef(val appId: Int?, val store: Store?, val storeId: String?) {
     fun game(games: List<Library.SteamGame>): Library.SteamGame? = when {
         appId != null -> games.firstOrNull { it.appId == appId }
@@ -136,11 +139,11 @@ internal class GameRef(val appId: Int?, val store: Store?, val storeId: String?)
     }
 }
 
-internal enum class GameTab { ABOUT, ACHIEVEMENTS, LAUNCH, SAVES, INSTALL }
+internal enum class GameTab { ABOUT, ACHIEVEMENTS, LAUNCH, SAVES, ADDONS, INSTALL }
 
 @Composable
 internal fun GameDetail(
-    key: String, s: FrontEndState, a: FrontEndActions, lead: FocusRequester, backLabel: String, hopRail: String?, onBack: () -> Unit,
+    key: String, s: FrontEndState, a: FrontEndActions, lead: FocusRequester, backLabel: String, hopRail: String?, onBack: () -> Unit, inStore: Boolean = false,
 ) {
     val narrow = LocalNarrowPane.current
     val stacked = narrow || LocalConfiguration.current.screenWidthDp < 700
@@ -180,12 +183,14 @@ internal fun GameDetail(
         .takeUnless { it.trim().equals(title.trim(), ignoreCase = true) }.orEmpty()
     val scored = scores != null && (scores.metacritic != Lookup.None || scores.hltb != Lookup.None)
     val prefix = game?.protonPrefix?.takeIf { it.isDirectory }
+    val addonTargets = remember(game?.gameId, game?.gameFiles) { game?.let(WowAddons::targets).orEmpty() }
     val tabs = buildList {
         if (description.isNotBlank() || developer.isNotBlank() || publisher.isNotBlank() || releaseDate.isNotBlank() || scored || (!s.shortcutPicker && title.isNotBlank() && title != id)) add(GameTab.ABOUT)
         if (achievementState != null) add(GameTab.ACHIEVEMENTS)
         val cloud = game?.library == Library.XBOX_CLOUD
         if (game != null && !cloud) add(GameTab.LAUNCH)
         if (game != null && game.library == Library.ADDED && prefix != null) add(GameTab.SAVES)
+        if (addonTargets.isNotEmpty()) add(GameTab.ADDONS)
         if ((game != null && !cloud) || installed != null) add(GameTab.INSTALL)
     }
     var picked by remember(key) { mutableStateOf<GameTab?>(null) }
@@ -195,7 +200,6 @@ internal fun GameDetail(
     var inPage by remember(key) { mutableStateOf(false) }
     var onStrip by remember(key) { mutableStateOf(false) }
     var dropped by remember(key) { mutableStateOf(0) }
-    // A tab's content is swapped or refreshed under the focused row; focus goes back to the tabs, not to the rail.
     LaunchedEffect(dropped) {
         if (dropped == 0) return@LaunchedEffect
         androidx.compose.runtime.withFrameNanos { }
@@ -220,6 +224,7 @@ internal fun GameDetail(
                     if (!s.shortcutPicker) CompositionLocalProvider(LocalPillButtons provides true) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (installed != null && installed.sidecar.store == Store.ITCH) ItchCheckButton(installed)
+                            if (installed != null && installed.sidecar.store == Store.GAMEJOLT) GameJoltCheckButton(installed)
                             RemoveButton(title, game, installed, a)
                         }
                     }
@@ -234,7 +239,7 @@ internal fun GameDetail(
                         color = MaterialTheme.colorScheme.error, maxLines = 3, overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(2.dp))
-                    GameCapsule(scores) { GameActions(store, id, game, item, installed, s, a, Modifier.focusRequester(lead), compactMenu = stacked) }
+                    GameCapsule(scores) { GameActions(store, id, game, item, installed, s, a, Modifier.focusRequester(lead), compactMenu = stacked, inStore = inStore) }
                 }
             }
             if (StoresMotion.heroLands) header() else Rise(1) { header() }
@@ -248,6 +253,7 @@ internal fun GameDetail(
                             } ?: stringResource(R.string.achievements_title)
                             GameTab.LAUNCH -> stringResource(R.string.game_tab_launch)
                             GameTab.SAVES -> stringResource(if (Store.byId(source).let { it == Store.GOG || it == Store.EPIC }) R.string.game_tab_saves_cloud else R.string.games_saves)
+                            GameTab.ADDONS -> stringResource(R.string.game_tab_addons)
                             GameTab.INSTALL -> stringResource(R.string.game_tab_install)
                         }
                     }
@@ -263,6 +269,7 @@ internal fun GameDetail(
                             GameTab.ACHIEVEMENTS -> achievementState?.let { st -> AchievementsTab(StoreAchievements.forSource(store?.id)?.label.orEmpty(), st) }
                             GameTab.LAUNCH -> if (game != null) LaunchTab(game, s, a, hopRail)
                             GameTab.SAVES -> if (game != null && prefix != null) SavesTab(game, prefix, a)
+                            GameTab.ADDONS -> if (game != null) AddonsTab(game, addonTargets, a)
                             GameTab.INSTALL -> InstallTab(game, installed, item, store)
                         }
                     }
@@ -319,7 +326,6 @@ private fun GameStatusLine(source: String, game: Library.SteamGame?, item: Catal
     }
 }
 
-/** One frosted pill that holds the game's actions and its headline scores. */
 @Composable
 private fun GameCapsule(scores: GameScores?, actions: @Composable () -> Unit) {
     Row(
@@ -385,7 +391,7 @@ private fun GameTitle(title: String, logo: Any?, titleSize: TextUnit) {
 @Composable
 internal fun GameActions(
     store: Store?, id: String?, game: Library.SteamGame?, item: CatalogItem?, installed: InstalledStoreGame?,
-    s: FrontEndState, a: FrontEndActions, leadOn: Modifier, compactMenu: Boolean = false,
+    s: FrontEndState, a: FrontEndActions, leadOn: Modifier, compactMenu: Boolean = false, inStore: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val storeKey = if (store != null && id != null) "${store.id}:$id" else null
@@ -402,20 +408,28 @@ internal fun GameActions(
             !cloud && (game != null || installed != null) -> {
                 val gone = storeKey?.let { StoresState.uninstalling[it] }
                 val xboxBusy = store == Store.XBOX && id != null && XboxContent.busy(id)
+                val preparing = (game?.launchKey ?: storeKey)?.let { it in s.preparingGames } == true
                 PrimaryButton(
-                    stringResource(R.string.stores_play), enabled = !s.busy && gone == null && download == null && !xboxBusy && (store != Store.GOG || installed?.sidecar?.isInstalled != false),
+                    stringResource(if (preparing) R.string.store_starting else R.string.stores_play),
+                    enabled = !s.busy && !preparing && gone == null && download == null && !xboxBusy && (store != Store.GOG || installed?.sidecar?.isInstalled != false),
                     main = true, icon = Icons.Filled.PlayArrow, modifier = leadOn,
                 ) {
-                    if (game != null) a.onSteamGame(game) else if (store != null && id != null) launchStoreGame(ctx, store, id, s, a)
+                    if (game != null) a.onSteamGame(game) else if (store != null && id != null) launchStoreGame(store, id, s, a)
                 }
                 if (game != null) {
                     if (compactMenu) GameMoreMenu(game, a) else {
                         FileButtons(game, a)
                         GameShortcutMenu(game, a)
-                        EditArtButton(game)
                     }
                 }
                 if (store == Store.ITCH && installed != null) ItchUpdateButton(installed, download == null && StoresState.uninstalling[installed.key] == null)
+                if (store == Store.GAMEJOLT && installed != null) GameJoltUpdateButton(installed, download == null && StoresState.uninstalling[installed.key] == null)
+                if (store == Store.GAMEJOLT && installed != null) GameJoltVersionButton(installed, download == null && StoresState.uninstalling[installed.key] == null)
+                if (inStore && store == Store.GAMEJOLT && installed != null) {
+                    SecondaryButton(stringResource(R.string.stores_view_on, Store.GAMEJOLT.shortLabel)) {
+                        openUrl(ctx, item?.storeUrl.orEmpty().ifBlank { GameJoltApi.pageUrl("game", installed.sidecar.id) })
+                    }
+                }
                 if (store == Store.GOG && installed != null) GogMaintenanceActions(installed)
                 if (store == Store.XBOX && id != null) XboxInstalledStream(id, game?.name ?: item?.title.orEmpty(), item)
                 if (store == Store.XBOX && installed != null && id != null) {
@@ -438,6 +452,7 @@ internal fun GameActions(
                     }
                     SecondaryButton(stringResource(R.string.bnet_open)) { a.onBattleNet() }
                 }
+                if (game != null && !compactMenu) EditArtButton(game)
             }
             download != null -> {
                 ActionChip(downloadLabel(download), ok = false)
@@ -485,7 +500,7 @@ internal fun GameActions(
                 }
                 if (!item.accessible) SecondaryButton(buyLabel(item)) { openStoreUrl(ctx, item) }
             }
-            item != null && item.store == Store.ITCH && item.isFree -> {
+            item != null && (item.store == Store.ITCH || item.store == Store.GAMEJOLT) && item.isFree -> {
                 InstallButton(stringResource(R.string.stores_install), leadOn) { StoresState.requestInstall(ctx, item) }
                 SecondaryButton(stringResource(R.string.stores_view_on, item.store.shortLabel)) { openStoreUrl(ctx, item) }
             }
@@ -500,7 +515,6 @@ internal fun GameActions(
     }
 }
 
-/** Xbox Cloud Gaming rows the user added to the Library, for games not installed here. */
 @Composable
 internal fun rememberXboxCloudRows(s: FrontEndState): List<Library.SteamGame> {
     val ctx = LocalContext.current
@@ -535,7 +549,6 @@ private fun XboxInstalledStream(id: String, title: String, item: CatalogItem?) {
 private fun XboxLibraryButton(id: String, item: CatalogItem?) {
     val ctx = LocalContext.current
     LaunchedEffect(Unit) { XboxCloudGames.load(ctx) }
-    // Add and Remove replace each other; the controller focus moves to the new button instead of getting lost.
     val slot = remember { FocusRequester() }
     val inputMode = androidx.compose.ui.platform.LocalInputModeManager.current
     val scope = rememberCoroutineScope()
@@ -572,7 +585,6 @@ private fun GameShortcutMenu(g: Library.SteamGame, a: FrontEndActions) {
     }
 }
 
-/** The pencil opens the editor each kind of game always had: the shortcut editor for added games, art for the rest. */
 @Composable
 private fun rememberEditArt(g: Library.SteamGame): (() -> Unit)? {
     val ctx = LocalContext.current
@@ -593,7 +605,6 @@ private fun EditArtButton(g: Library.SteamGame) {
     IconAction(Icons.Outlined.Edit, stringResource(R.string.game_edit_art), "game:edit", onClick = open)
 }
 
-/** Narrow screens keep one More button in the capsule instead of a row of small ones. */
 @Composable
 private fun GameMoreMenu(g: Library.SteamGame, a: FrontEndActions) {
     var open by remember(g.gameId) { mutableStateOf(false) }
@@ -614,25 +625,35 @@ private fun GameMoreMenu(g: Library.SteamGame, a: FrontEndActions) {
 }
 
 @Composable
-internal fun IconAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, id: String, danger: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun IconAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, id: String, danger: Boolean = false, enabled: Boolean = true, frosted: Boolean = false, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val shape = if (LocalPillButtons.current) CircleShape else Shape12
+    val pill = LocalPillButtons.current
+    val shape = if (pill) CircleShape else Shape12
     val pal = LocalPalette.current
     val src = remember { MutableInteractionSource() }
     val hot = rememberHot(src) && enabled
     val accent = if (danger) colors.error else pal.signal
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier.paneItem(id).downToFirstTile().size(if (LocalPillButtons.current) 40.dp else 44.dp).clip(shape)
-            .background(if (hot) accent.copy(alpha = if (danger) 0.22f else 0.14f) else if (danger) Color.Black.copy(alpha = 0.34f) else Color.White.copy(alpha = 0.03f))
-            .glideBorder(hot, shape, accent, pal.line2)
-            .alpha(if (enabled) 1f else 0.45f)
-            .hoverable(src).clickable(interactionSource = src, indication = LocalIndication.current, role = androidx.compose.ui.semantics.Role.Button, enabled = enabled, onClick = onClick)
-            .controllerConfirm(enabled = enabled, onClick = onClick)
-            .semantics { contentDescription = label },
-    ) {
-        Icon(icon, contentDescription = null, tint = if (danger && hot) colors.error else if (danger) Color.White else colors.onBackground, modifier = Modifier.size(18.dp))
+    val fill = when {
+        hot -> accent.copy(alpha = if (danger) 0.22f else 0.14f)
+        pill -> Color.White.copy(alpha = 0.09f)
+        danger -> Color.Black.copy(alpha = 0.34f)
+        else -> Color.White.copy(alpha = 0.03f)
     }
+    val button: @Composable () -> Unit = {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.paneItem(id).downToFirstTile().size(if (pill) 40.dp else 44.dp).clip(shape)
+                .background(fill)
+                .glideBorder(hot, shape, accent, if (pill) Color.White.copy(alpha = 0.14f) else pal.line2)
+                .alpha(if (enabled) 1f else 0.45f)
+                .hoverable(src).clickable(interactionSource = src, indication = LocalIndication.current, role = androidx.compose.ui.semantics.Role.Button, enabled = enabled, onClick = onClick)
+                .controllerConfirm(enabled = enabled, onClick = onClick)
+                .semantics { contentDescription = label },
+        ) {
+            Icon(icon, contentDescription = null, tint = if (danger && hot) colors.error else if (danger && !pill) Color.White else colors.onBackground, modifier = Modifier.size(18.dp))
+        }
+    }
+    if (frosted) Box(Modifier.glass(CircleShape)) { button() } else button()
 }
 
 @Composable
@@ -645,7 +666,7 @@ private fun RemoveButton(title: String, game: Library.SteamGame?, installed: Ins
         val gone = StoresState.uninstalling[key]
         if (gone != null) {
             val uninstalling = stringResource(R.string.stores_uninstalling)
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(44.dp).clip(Shape12).background(Color.Black.copy(alpha = 0.34f)).semantics { contentDescription = uninstalling }) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(40.dp).glass(CircleShape).semantics { contentDescription = uninstalling }) {
                 if (gone > 0f) CircularProgressIndicator(progress = { gone }, strokeWidth = 2.dp, color = colors.error, trackColor = colors.error.copy(alpha = 0.22f), modifier = Modifier.size(20.dp))
                 else CircularProgressIndicator(strokeWidth = 2.dp, color = colors.error, modifier = Modifier.size(20.dp))
             }
@@ -659,7 +680,7 @@ private fun RemoveButton(title: String, game: Library.SteamGame?, installed: Ins
         val busy = StoresState.download(key)?.isActive == true || (installed.sidecar.store == Store.XBOX && XboxContent.busy(installed.sidecar.id))
         val placed = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
         Box(Modifier.onGloballyPositioned { placed[0] = it }) {
-            IconAction(Icons.Outlined.Delete, remove, "game:remove", danger = true, enabled = !busy) {
+            IconAction(Icons.Outlined.Delete, remove, "game:remove", danger = true, enabled = !busy, frosted = true) {
                 val at = placed[0]?.takeIf { it.isAttached }?.boundsInRoot() ?: return@IconAction
                 var confirmed = false
                 Steps.ask(StepAsk(anchor = at, side = StepSide.Left, accent = colors.error, items = 3, pillCorner = 12.dp, maxWidth = 340.dp,
@@ -682,7 +703,7 @@ private fun RemoveButton(title: String, game: Library.SteamGame?, installed: Ins
     var asking by remember(g.gameId) { mutableStateOf(false) }
     val shortcut = kind == GameRemoval.Kind.SHORTCUT
     val label = stringResource(if (shortcut) R.string.edit_remove else R.string.common_uninstall)
-    IconAction(Icons.Outlined.Delete, label, "game:remove", danger = true) { asking = true }
+    IconAction(Icons.Outlined.Delete, label, "game:remove", danger = true, frosted = true) { asking = true }
     if (asking) ConfirmDialog(
         title = if (shortcut) stringResource(R.string.games_remove_title, g.name) else stringResource(R.string.stores_uninstall_title, g.name),
         text = when {
@@ -789,10 +810,16 @@ private fun LaunchTab(game: Library.SteamGame, s: FrontEndState, a: FrontEndActi
     val host = rememberMenuHost()
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
         LaunchSettings(s, a, host, game, hopRail ?: GameRef.key(game))
+        if (canEditSteamLaunchOptions(game, s.shortcutPicker)) {
+            SteamLaunchOptionsPanel(game.appId)
+        }
         val folder = game.gameFiles
         if (game.library == Library.ADDED && game.source == Library.ADDED && !s.shortcutPicker && folder != null) ShortcutFields(game, folder)
     }
 }
+
+internal fun canEditSteamLaunchOptions(game: Library.SteamGame, shortcutPicker: Boolean): Boolean =
+    !shortcutPicker && game.source == Library.SOURCE_STEAM && game.library != Library.ADDED
 
 @Composable
 private fun ShortcutFields(game: Library.SteamGame, folder: File) {
@@ -843,6 +870,47 @@ private fun SavesTab(g: Library.SteamGame, prefix: File, a: FrontEndActions) {
             }
         }
     }
+}
+
+@Composable
+private fun AddonsTab(g: Library.SteamGame, targets: List<WowAddons.Target>, a: FrontEndActions) {
+    var browsing by remember(g.gameId) { mutableStateOf<WowAddons.Target?>(null) }
+    browsing?.let { AddonBrowserDialog(targets, it) { browsing = null } }
+    Column(Modifier.fillMaxWidth().tabPanel(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        targets.forEach { target ->
+            val names by produceState(emptyList<String>(), target.addOns, WowAddons.imports) {
+                value = withContext(Dispatchers.IO) { WowAddons.installed(target) }
+            }
+            if (targets.size > 1) SectionLabel(target.flavor)
+            MenuItem(stringResource(R.string.addons_download), checked = false) { browsing = target }
+            MenuItem(
+                stringResource(R.string.games_import_addons), checked = false,
+                detail = pluralStringResource(R.plurals.games_addons_count, names.size, names.size),
+            ) { a.onAddonImport(g, target) }
+            MenuItem(stringResource(R.string.games_open_addons_folder), checked = false) {
+                target.addOns.mkdirs()
+                a.onBrowseFiles(target.addOns)
+            }
+            names.forEach { name -> AddonRow(name, target, a) }
+        }
+    }
+}
+
+@Composable
+private fun AddonRow(name: String, target: WowAddons.Target, a: FrontEndActions) {
+    var asking by remember(target.addOns, name) { mutableStateOf(false) }
+    val delete = stringResource(R.string.common_delete)
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 2.dp, bottom = 2.dp)) {
+        Text(name, fontSize = 14.sp, color = MaterialTheme.colorScheme.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (!SessionState.running) IconAction(Icons.Outlined.Delete, delete, "addon:delete:${target.flavor}:$name", danger = true) { asking = true }
+    }
+    if (asking) ConfirmDialog(
+        title = stringResource(R.string.games_delete_addon_title, name),
+        text = stringResource(R.string.games_delete_addon_body),
+        confirm = delete,
+        onConfirm = { a.onAddonDelete(target, name) },
+        onDismiss = { asking = false },
+    )
 }
 
 @Composable
@@ -922,7 +990,6 @@ private fun InstallTab(game: Library.SteamGame?, installed: InstalledStoreGame?,
     }
 }
 
-/** Text a controller has to land on to bring it into view: focusable, with the focus ring. */
 @Composable
 internal fun Modifier.readable(): Modifier {
     val pal = LocalPalette.current
@@ -943,7 +1010,6 @@ internal fun FactRow(label: String, value: String, labelWidth: androidx.compose.
     }
 }
 
-/** Store installs are measured by [StoreSizes]; Steam and added games by walking their folder once. */
 @Composable
 internal fun diskSize(installed: InstalledStoreGame?, folder: File): Long? {
     val ctx = LocalContext.current

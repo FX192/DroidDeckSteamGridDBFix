@@ -15,6 +15,7 @@ object DesktopCatalog {
     const val CATALOG_URL = "https://raw.githubusercontent.com/Droid-Deck/DroidDeck-Components/main/desktop.json"
     const val STEAM_SEED_URL = "https://raw.githubusercontent.com/Droid-Deck/DroidDeck-Components/main/steam-seed.json"
     const val PROTON_SEED_ID = "proton-arm64"
+    const val APPIMAGE_EXEC = "/usr/local/bin/droiddeck-appimage-exec"
 
     class Entry(
         val id: String, val name: String, val tier: Int, val version: String, val kind: String,
@@ -51,7 +52,6 @@ object DesktopCatalog {
 
     private fun journal(root: File, id: String) = File(root, ".droiddeck-pkg-$id$JOURNAL_SUFFIX")
 
-    /** Packages whose extraction over the runtime started and never finished. */
     fun interrupted(context: Context): List<Entry> = interrupted(LinuxRuntime.rootDir(context))
 
     fun interrupted(root: File): List<Entry> =
@@ -63,7 +63,6 @@ object DesktopCatalog {
 
     private fun downloadFile(context: Context, entry: Entry) = File(context.cacheDir, "pkg-${entry.id}-${entry.sha256.take(12)}.download")
 
-    /** Drops downloads kept for installs that no longer need finishing, such as after the runtime was reinstalled. */
     fun pruneDownloads(context: Context) = synchronized(installLock) {
         val keep = interrupted(context).map { downloadFile(context, it).name }.toSet()
         context.cacheDir.listFiles { f -> f.name.startsWith("pkg-") && f.name.removeSuffix(".resume.properties").endsWith(".download") }
@@ -102,7 +101,6 @@ object DesktopCatalog {
         o.optString("icon", "applications-games"), o.optString("category", "Game"),
     )
 
-    /** A finished download is kept until its extraction completes, so resuming does not fetch it again. */
     private fun downloaded(file: File, entry: Entry): Boolean =
         file.isFile && file.length() > 0 && !File(file.path + ".resume.properties").exists() &&
             (entry.size <= 0 || file.length() == entry.size) && entry.sha256.equals(Hashes.sha256(file), ignoreCase = true)
@@ -219,7 +217,7 @@ object DesktopCatalog {
                     target.setExecutable(true, false)
                     FileUtils.writeString(File(root, "usr/share/applications/droiddeck-${entry.id}.desktop"),
                         "[Desktop Entry]\nType=Application\nName=${entry.name}\n" +
-                        "Exec=env APPIMAGE_EXTRACT_AND_RUN=1 /opt/appimages/${entry.id}.AppImage\n" +
+                        "Exec=$APPIMAGE_EXEC /opt/appimages/${entry.id}.AppImage\n" +
                         "Icon=${entry.icon}\nTerminal=false\nCategories=${entry.category};\n")
                 }
                 else -> {

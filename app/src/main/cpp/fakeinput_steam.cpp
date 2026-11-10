@@ -30,6 +30,7 @@
 #include <linux/uinput.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -78,7 +79,6 @@ static constexpr uint8_t GAMEPAD_AXIS_COUNT = 8;
 static constexpr uint8_t GAMEPAD_BUTTON_COUNT = 11;
 static constexpr uint32_t FAKE_INPUT_RING_MAGIC = 0x46494252;
 static constexpr uint32_t FAKE_INPUT_RING_VERSION = 2;
-// Rings hold the 64-bit input_event layout that the arm64 writers use; 32-bit guests convert on read.
 struct RingEvent {
   int64_t sec;
   int64_t usec;
@@ -209,23 +209,33 @@ struct FakeConfig {
   bool uinput_enabled;
 };
 
+// The first allocation here can start the host program's own allocator, which may call a hooked
+// function (mimalloc probes NUMA nodes with access()) and land back in config(). A guarded static
+// would throw a recursive-init error there, so the fields are filled without allocating, and a
+// reentry on the initializing thread gets them while other threads wait for the fork handlers.
 static FakeConfig &config() {
-  static FakeConfig *cfg = [] {
-    auto *c = new FakeConfig();
-    const char *dir = getenv("FAKE_EVDEV_DIR");
-    c->hook_dir = dir ? dir : "/data/data/com.termux/files/home/fake-input";
-    c->udev_data_dir = getenv("FAKE_UDEV_DATA_DIR");
-    c->vibration_enabled =
-        getenv("FAKE_EVDEV_VIBRATION") && atoi(getenv("FAKE_EVDEV_VIBRATION"));
-    const char *identity = getenv("FAKE_EVDEV_IDENTITY");
-    c->xbox360_identity = identity && !strcmp(identity, "xbox360");
-    c->uinput_enabled = getenv("FAKE_EVDEV_UINPUT") && atoi(getenv("FAKE_EVDEV_UINPUT"));
-    pthread_atfork(controller_fork_prepare, controller_fork_parent,
-                   controller_fork_child);
-    Logger::init();
-    return c;
-  }();
-  return *cfg;
+  static FakeConfig cfg;
+  static std::atomic<int> state{0};
+  static __thread bool initializing __attribute__((tls_model("initial-exec")));
+  if (state.load(std::memory_order_acquire) == 2 || initializing) return cfg;
+  int expected = 0;
+  if (!state.compare_exchange_strong(expected, 1, std::memory_order_acq_rel)) {
+    while (state.load(std::memory_order_acquire) != 2) sched_yield();
+    return cfg;
+  }
+  initializing = true;
+  const char *dir = getenv("FAKE_EVDEV_DIR");
+  cfg.hook_dir = dir ? dir : "/data/data/com.termux/files/home/fake-input";
+  cfg.udev_data_dir = getenv("FAKE_UDEV_DATA_DIR");
+  cfg.vibration_enabled = getenv("FAKE_EVDEV_VIBRATION") && atoi(getenv("FAKE_EVDEV_VIBRATION"));
+  const char *identity = getenv("FAKE_EVDEV_IDENTITY");
+  cfg.xbox360_identity = identity && !strcmp(identity, "xbox360");
+  cfg.uinput_enabled = getenv("FAKE_EVDEV_UINPUT") && atoi(getenv("FAKE_EVDEV_UINPUT"));
+  pthread_atfork(controller_fork_prepare, controller_fork_parent, controller_fork_child);
+  Logger::init();
+  state.store(2, std::memory_order_release);
+  initializing = false;
+  return cfg;
 }
 
 static std::recursive_mutex &controller_mutex() {
@@ -391,7 +401,6 @@ send_vibration(int strong, int weak, uint16_t duration_ms, uint16_t slot) {
   syscall(SYS_close, sock);
 }
 
-// Must match RumbleComponent.HOLD_MS: play until the slot's next effect or stop.
 static constexpr uint16_t RUMBLE_HOLD_MS = 0xffff;
 
 __attribute__((visibility("hidden"))) static void send_ff_effect(const struct ff_effect &effect, uint16_t slot) {
@@ -1243,7 +1252,6 @@ static constexpr int TRITON_REPORT_ID_BYTES = 1;
 static constexpr int TRITON_STATE_BYTES = 45;
 static constexpr int TRITON_REPORT_INTERVAL_US = 4000;
 static constexpr int TRITON_FEATURE_TIMEOUT_MS = 500;
-// The app clears output_length once it has taken a report; a writer waits this long for that before overwriting.
 static constexpr int TRITON_OUTPUT_TIMEOUT_MS = 50;
 static constexpr const char *TRITON_NAME = "Steam Controller";
 static constexpr const char *TRITON_SERIAL = "DROIDDECKSC01";
@@ -2673,9 +2681,6 @@ __attribute__((visibility("hidden"))) static int triton_get_feature(DeckHidraw &
 static constexpr uint32_t TRITON_HWID = 72;
 static constexpr uint32_t TRITON_FW_TIMESTAMP = 0x6AC686B3;
 
-// Steam compares the controller's firmware with TRITON_FW_TS in its bundled hardwareupdater.cfg (and blocks
-// with a required update below MUST_UPDATE_TRITON_FW_TS), so the emulated pad reports at least the build
-// Steam ships.
 static uint32_t triton_fw_timestamp() {
   static const uint32_t timestamp = [] {
     std::vector<std::string> roots;
@@ -2959,15 +2964,19 @@ EXPORT DIR *opendir(const char *name) {
   return dir;
 }
 
+static bool open_has_mode(int flags) {
+  return (flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE;
+}
+
 EXPORT int open(const char *pathname, int flags, ...) {
   va_list va;
-  mode_t mode;
+  mode_t mode = 0;
   int fd;
   bool hasMode;
 
   va_start(va, flags);
 
-  hasMode = flags & O_CREAT;
+  hasMode = open_has_mode(flags);
 
   if (hasMode) {
     mode = va_arg(va, mode_t);
@@ -3039,13 +3048,13 @@ EXPORT int open(const char *pathname, int flags, ...) {
 
 EXPORT int openat(int dirfd, const char *pathname, int flags, ...) {
   va_list va;
-  mode_t mode;
+  mode_t mode = 0;
   int fd;
   bool hasMode;
 
   va_start(va, flags);
 
-  hasMode = flags & O_CREAT;
+  hasMode = open_has_mode(flags);
 
   if (hasMode) {
     mode = va_arg(va, mode_t);
@@ -3679,7 +3688,6 @@ EXPORT int ioctl(int fd, ioctl_request_t op, ...) {
     Logger::log("Hooking ioctl EVIOCGRAB for event %s\n", event);
     return 0;
   } else if (type == 0x6A && !strncmp(event, "event", 5)) {
-    // Older SDL2 builds treat any JSIOCGNAME answer as a joydev node and skip EVIOCGID, then drop the pad as 0000:0000.
     Logger::log("Rejecting joydev ioctl %d for event %s\n", number, event);
     guard.unlock();
     errno = EINVAL;
@@ -4258,7 +4266,7 @@ EXPORT int select(int nfds, fd_set *readfds, fd_set *writefds,
 
 #ifdef __GLIBC__
 static mode_t open_mode(int flags, va_list va) {
-  return (flags & (O_CREAT | O_TMPFILE)) ? va_arg(va, mode_t) : 0;
+  return open_has_mode(flags) ? va_arg(va, mode_t) : 0;
 }
 
 EXPORT int open64(const char *pathname, int flags, ...) {

@@ -1,4 +1,3 @@
-"""The guest agent: its request files, exec, errors and the DevTools client, without a session."""
 import base64
 import hashlib
 import importlib.machinery
@@ -26,7 +25,6 @@ loader.exec_module(agent)
 
 
 class FakeDevTools(threading.Thread):
-    """GET /json lists one target; its WebSocket answers Runtime.evaluate the way Chromium does."""
 
     def __init__(self, answer):
         super().__init__(daemon=True)
@@ -459,6 +457,26 @@ class AgentTest(unittest.TestCase):
                 self.assertEqual(1, agent.main(["--steam-shortcut-state", game_id]))
             self.assertEqual(2, agent.main(["--steam-shortcut-state"]))
 
+    def test_steam_ready_uses_steams_initialized_store(self):
+        with patch.object(agent, "cdp_eval", return_value={"value": True}) as evaluate:
+            self.assertTrue(agent.steam_ready(self.dir))
+        self.assertIn("m_bIsInitialized", evaluate.call_args.args[1])
+        with patch.object(agent, "cdp_eval", return_value={"value": False}):
+            self.assertFalse(agent.steam_ready(self.dir))
+
+    def test_pending_interstitial_is_continued_by_steam(self):
+        with patch.object(agent, "cdp_eval", return_value={"value": True}) as evaluate:
+            self.assertTrue(agent.steam_clear_pending_interstitial(self.dir, "3551182975"))
+        expression = evaluate.call_args.args[1]
+        self.assertIn("ContinueGameAction", expression)
+        self.assertIn("ShowInterstitials", expression)
+        self.assertIn('"3551182975"', expression)
+        self.assertIn("await apps.GetActiveGameActions()", expression)
+        with patch.object(agent, "cdp_eval", return_value={"value": False}):
+            self.assertFalse(agent.steam_clear_pending_interstitial(self.dir, "3551182975"))
+        with self.assertRaises(agent.AgentError):
+            agent.steam_clear_pending_interstitial(self.dir, "0")
+
     def test_asleep_command_reports_steams_own_sleep_state(self):
         with patch.dict(os.environ, {"BL_LAUNCH_DIR": str(self.dir.parent)}):
             for value, code in (("yes", 0), ("no", 5), ("unknown", 1), (None, 1)):
@@ -857,7 +875,6 @@ class VrFocusTest(unittest.TestCase):
         self.assertEqual(focus.order([42, 9, 7], [7, 42], None), [9, 7])
         self.assertIsNone(focus.order([9, 7], [7], 42))
         self.assertEqual(focus.order([9, 7], [7, 42], 42), [42, 9, 7])
-        # Do not overwrite a different focus order installed after our last write.
         self.assertIsNone(focus.order([123, 7], [7, 42], None))
 
     def test_scene_requires_live_server_and_game_environment(self):
