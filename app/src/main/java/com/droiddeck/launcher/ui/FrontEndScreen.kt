@@ -179,6 +179,7 @@ class FrontEndState(
     val gameStoresEnabled: Boolean = true,
     val soundtracksEnabled: Boolean = true,
     val soundtracks: List<Library.SteamGame> = emptyList(),
+    val soundtracksLoaded: Boolean = true,
     val gameStoresSpeedTier: String = "fast",
     val navigate: String? = null,
     val addedGamesArt: Boolean = true,

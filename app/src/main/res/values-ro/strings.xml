@@ -3704,7 +3704,7 @@
     <string name="soundtracks_add_title">Adaugă un dosar de coloană sonoră</string>
     <string name="soundtracks_add_empty">Niciun fișier audio în acel dosar</string>
     <string name="soundtracks_total_length">Durată totală</string>
-    <string name="soundtracks_length_value">%1$d piese / %2$s</string>
+    <string name="soundtracks_length_value">Piese: %1$d · %2$s</string>
     <string name="soundtracks_disc">Discul %1$s</string>
     <string name="soundtracks_shuffle">Amestecare</string>
     <string name="soundtracks_previous">Anterior</string>

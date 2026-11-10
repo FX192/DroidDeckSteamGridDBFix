@@ -30,7 +30,7 @@ class SoundtrackService : MediaSessionService() {
         val sessionIntent = packageManager.getLaunchIntentForPackage(packageName)?.let {
             PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         }
-        session = MediaSession.Builder(this, player).setCallback(Resolver).apply { sessionIntent?.let { setSessionActivity(it) } }.build()
+        session = MediaSession.Builder(this, player).setCallback(Resolver(packageName)).apply { sessionIntent?.let { setSessionActivity(it) } }.build()
         setMediaNotificationProvider(DefaultMediaNotificationProvider(this).apply { setSmallIcon(R.drawable.ic_soundtrack) })
     }
 
@@ -50,7 +50,14 @@ class SoundtrackService : MediaSessionService() {
         super.onDestroy()
     }
 
-    private object Resolver : MediaSession.Callback {
+    private class Resolver(private val ownPackage: String) : MediaSession.Callback {
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
+            if (controller.packageName == ownPackage || controller.isTrusted || session.isMediaNotificationController(controller)) {
+                MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
+            } else {
+                MediaSession.ConnectionResult.reject()
+            }
+
         override fun onAddMediaItems(
             mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> {

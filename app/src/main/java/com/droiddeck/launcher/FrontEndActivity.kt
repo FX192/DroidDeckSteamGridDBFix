@@ -206,6 +206,7 @@ class FrontEndActivity : ComponentActivity() {
     private var gameStoresEnabled by mutableStateOf(true)
     private var soundtracksEnabled by mutableStateOf(true)
     private var soundtracks by mutableStateOf<List<Library.SteamGame>>(emptyList())
+    private var soundtracksLoaded by mutableStateOf(false)
     private var gameStoresSpeedTier by mutableStateOf("fast")
     private var navRequest by mutableStateOf<String?>(null)
     private val gameLaunchRequest = java.util.concurrent.atomic.AtomicLong()
@@ -1235,6 +1236,7 @@ class FrontEndActivity : ComponentActivity() {
                         gameStoresEnabled = gameStoresEnabled,
                         soundtracksEnabled = soundtracksEnabled,
                         soundtracks = soundtracks,
+                        soundtracksLoaded = soundtracksLoaded,
                         gameStoresSpeedTier = gameStoresSpeedTier,
                         navigate = navRequest,
                         addedGamesArt = addedGamesArt,
@@ -2951,7 +2953,7 @@ class FrontEndActivity : ComponentActivity() {
                 (if (ready || com.droiddeck.launcher.runtime.LinuxRuntime.hasRootfs(this)) Library.soundtracks(this, scannedArch) else emptyList()) +
                     com.droiddeck.launcher.frontend.AddedSoundtracks.games(this)
             }.getOrDefault(emptyList())
-            ui.post { if (scanGeneration == libraryScanGeneration) soundtracks = scannedSoundtracks }
+            ui.post { if (scanGeneration == libraryScanGeneration) { soundtracks = scannedSoundtracks; soundtracksLoaded = true } }
             val games = if (ready || com.droiddeck.launcher.runtime.LinuxRuntime.hasRootfs(this)) Library.launchableGames(this, arch = scannedArch) else emptyList()
             val all = games.distinctBy { it.gameId }
             if (ready && scanGeneration == libraryScanGeneration) com.droiddeck.launcher.frontend.LibraryCache.save(this, all, scannedX64)

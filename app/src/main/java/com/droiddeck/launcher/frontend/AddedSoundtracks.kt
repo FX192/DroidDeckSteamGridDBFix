@@ -43,10 +43,18 @@ object AddedSoundtracks {
 
     internal fun idOf(path: String): Int = path.hashCode() or Int.MIN_VALUE
 
-    fun games(context: Context): List<Library.SteamGame> = entries(context).mapNotNull { e ->
-        val dir = File(e.path).takeIf { it.isDirectory } ?: return@mapNotNull null
-        val id = idOf(e.path)
-        Library.SteamGame(
+    fun games(context: Context): List<Library.SteamGame> {
+        val used = HashSet<Int>()
+        return entries(context).mapNotNull { e ->
+            val dir = File(e.path).takeIf { it.isDirectory } ?: return@mapNotNull null
+            var id = idOf(e.path)
+            while (!used.add(id)) id = (id + 1) or Int.MIN_VALUE
+            game(e, dir, id)
+        }
+    }
+
+    private fun game(e: Entry, dir: File, id: Int): Library.SteamGame {
+        return Library.SteamGame(
             appId = id, name = e.name, art = Soundtrack.cover(dir), library = Library.ADDED, gameId = id.toLong() and 0xFFFFFFFFL,
             gameFiles = dir, source = Library.ADDED, soundtrack = true,
         )

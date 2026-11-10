@@ -31,6 +31,8 @@ object SoundtrackController {
         private set
     var buffering by mutableStateOf(false)
         private set
+    var volume by mutableStateOf(1f)
+        private set
 
     private var future: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
@@ -56,6 +58,7 @@ object SoundtrackController {
         title = ""
         durationMs = 0L
         buffering = false
+        volume = 1f
     }
 
     private fun sync(player: Player) {
@@ -66,6 +69,7 @@ object SoundtrackController {
         shuffle = player.shuffleModeEnabled
         repeat = player.repeatMode
         durationMs = player.duration.takeIf { it > 0 } ?: 0L
+        volume = player.volume
     }
 
     private fun run(context: Context, block: (MediaController) -> Unit) {
@@ -159,7 +163,6 @@ object SoundtrackController {
         }
     }
     fun setVolume(context: Context, volume: Float) = run(context) { it.volume = volume.coerceIn(0f, 1f) }
-    fun volume(): Float = controller?.volume ?: 1f
 
     fun stopIf(context: Context, root: File?) {
         if (!belongs(root)) return

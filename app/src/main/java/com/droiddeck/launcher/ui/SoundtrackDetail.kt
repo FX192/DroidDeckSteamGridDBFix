@@ -75,13 +75,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private sealed interface SoundRow {
-    class Disc(val label: String) : SoundRow
+    class Disc(val number: Int, val label: String) : SoundRow
     class Item(val track: Soundtrack.Track) : SoundRow
 }
 
 private fun rowsOf(album: Soundtrack.Album): List<SoundRow> = buildList {
     for ((disc, tracks) in album.disc) {
-        if (album.multiDisc) add(SoundRow.Disc(tracks.firstOrNull()?.discLabel ?: disc.toString()))
+        if (album.multiDisc) add(SoundRow.Disc(disc, tracks.firstOrNull()?.discLabel ?: disc.toString()))
         tracks.forEach { add(SoundRow.Item(it)) }
     }
 }
@@ -90,7 +90,7 @@ private fun rowsOf(album: Soundtrack.Album): List<SoundRow> = buildList {
 internal fun SoundtrackDetail(key: String, s: FrontEndState, a: FrontEndActions, lead: FocusRequester, backLabel: String, onBack: () -> Unit) {
     val appId = remember(key) { key.removePrefix("sound:").toIntOrNull() }
     val game = s.soundtracks.firstOrNull { it.appId == appId }
-    LaunchedEffect(game == null) { if (game == null) onBack() }
+    LaunchedEffect(game == null, s.soundtracksLoaded) { if (game == null && s.soundtracksLoaded) onBack() }
     if (game == null) return
     val ctx = LocalContext.current
     val narrow = LocalNarrowPane.current
@@ -211,8 +211,12 @@ private fun Seek(game: Library.SteamGame, album: Soundtrack.Album?) {
     var dragging by remember { mutableStateOf(false) }
     val duration = if (belongs) SoundtrackController.durationMs else 0L
     LaunchedEffect(belongs, SoundtrackController.currentId) {
+        if (!belongs) {
+            if (!dragging) position = 0f
+            return@LaunchedEffect
+        }
         while (true) {
-            if (!dragging) position = if (belongs) SoundtrackController.position().toFloat() else 0f
+            if (!dragging) position = SoundtrackController.position().toFloat()
             delay(400)
         }
     }
@@ -238,7 +242,8 @@ private fun Volume() {
     val ctx = LocalContext.current
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
-    var level by remember { mutableFloatStateOf(SoundtrackController.volume()) }
+    var level by remember { mutableFloatStateOf(SoundtrackController.volume) }
+    LaunchedEffect(SoundtrackController.volume) { level = SoundtrackController.volume }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
         Icon(if (level <= 0.001f) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp, contentDescription = stringResource(R.string.soundtracks_volume), tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
         Slider(
@@ -356,7 +361,7 @@ private fun TrackList(game: Library.SteamGame, album: Soundtrack.Album, modifier
     LazyColumn(
         state = state, modifier = modifier.clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.28f)).testTag("soundtrack-tracks"),
     ) {
-        items(rows, key = { if (it is SoundRow.Item) it.track.id else "disc-${(it as SoundRow.Disc).label}" }) { row ->
+        items(rows, key = { if (it is SoundRow.Item) it.track.id else "disc-${(it as SoundRow.Disc).number}" }) { row ->
             when (row) {
                 is SoundRow.Disc -> Text(
                     stringResource(R.string.soundtracks_disc, row.label), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.onBackground,
