@@ -61,6 +61,7 @@ class SoundtrackService : MediaSessionService() {
         override fun onAddMediaItems(
             mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> {
+            if (controller.packageName != ownPackage) return Futures.immediateFuture(mutableListOf())
             val resolved = mediaItems.mapNotNull { item ->
                 val file = File(item.mediaId)
                 if (Soundtrack.isAudio(file)) item.buildUpon().setUri(Uri.fromFile(file)).build() else null
