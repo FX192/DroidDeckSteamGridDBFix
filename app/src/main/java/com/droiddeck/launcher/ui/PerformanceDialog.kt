@@ -36,6 +36,7 @@ fun PerformancePage(
     clientOverride: Boolean,
     clientCores: Set<Int>,
     gameCores: Set<Int>,
+    paceCores: Boolean,
     tuSysmem: Boolean,
     zinkLazy: Boolean,
     glThread: Boolean,
@@ -48,15 +49,18 @@ fun PerformancePage(
     gpuClockPin: Boolean,
     ramCapMb: Int,
     zramClient: Boolean,
+    zramIdle: Boolean,
     vramCapMb: Int,
     deviceRamMb: Int,
     ramCapAvailable: Boolean,
     prootNoSeccomp: Boolean,
     prootFastPath: Boolean,
+    nativeUserland: Boolean,
     cursorComposite: Boolean,
     guestHostname: String,
     phantomWarning: String?,
     onClientOverride: (Boolean) -> Unit,
+    onPaceCores: (Boolean) -> Unit,
     onTuSysmem: (Boolean) -> Unit,
     onZinkLazy: (Boolean) -> Unit,
     onGlThread: (Boolean) -> Unit,
@@ -69,23 +73,22 @@ fun PerformancePage(
     onGpuClockPin: (Boolean) -> Unit,
     onRamCapMb: (Int) -> Unit,
     onZramClient: (Boolean) -> Unit,
+    onZramIdle: (Boolean) -> Unit,
     onVramCapMb: (Int) -> Unit,
     onProotNoSeccomp: (Boolean) -> Unit,
     onProotFastPath: (Boolean) -> Unit,
+    onNativeUserland: (Boolean) -> Unit,
     onCursorComposite: (Boolean) -> Unit,
     onGuestHostname: (String) -> Unit,
     onClientCore: (Int, Boolean) -> Unit,
     onGameCore: (Int, Boolean) -> Unit,
     onDismiss: () -> Unit,
+    embedded: Boolean = false,
 ) {
     val host = rememberMenuHost()
     val colors = MaterialTheme.colorScheme
     val coreItems = cores.map { it.core to it.label }
-    SettingsPage(
-        host, title = stringResource(R.string.perf_title),
-        lede = stringResource(R.string.perf_lede),
-        onBack = onDismiss,
-    ) {
+    val body: @Composable () -> Unit = {
         SettingsGroup(stringResource(R.string.perf_client_cores_group)) {
             ToggleRow(
                 host, "override", stringResource(R.string.perf_override),
@@ -102,6 +105,11 @@ fun PerformancePage(
                 host, "gameCores", stringResource(R.string.perf_game_cores),
                 stringResource(R.string.perf_game_cores_hint),
                 coreItems, gameCores, onToggle = onGameCore,
+            )
+            ToggleRow(
+                host, "paceCores", stringResource(R.string.perf_pace_cores),
+                stringResource(R.string.perf_pace_cores_hint),
+                paceCores, onChange = onPaceCores,
             )
         }
         SettingsGroup(stringResource(R.string.perf_client_ui)) {
@@ -137,6 +145,11 @@ fun PerformancePage(
             val top = (deviceRamMb / MEMORY_CAP_STEP_MB * MEMORY_CAP_STEP_MB).coerceAtLeast(MEMORY_CAP_STEP_MB)
             val off = stringResource(R.string.perf_cap_off)
             val auto = stringResource(R.string.perf_cap_auto)
+            ToggleRow(
+                host, "zramidle", stringResource(R.string.perf_zram_idle),
+                if (ramCapAvailable) stringResource(R.string.perf_zram_idle_hint) else stringResource(R.string.perf_ram_cap_unavailable),
+                zramIdle && ramCapAvailable, enabled = ramCapAvailable, onChange = onZramIdle,
+            )
             ToggleRow(
                 host, "zramclient", stringResource(R.string.perf_zram_client),
                 if (ramCapAvailable) stringResource(R.string.perf_zram_client_hint) else stringResource(R.string.perf_ram_cap_unavailable),
@@ -187,9 +200,18 @@ fun PerformancePage(
             )
             ToggleRow(
                 host, "fastpath", stringResource(R.string.perf_fastpath),
-                if (prootNoSeccomp) stringResource(R.string.perf_fastpath_needs_seccomp)
-                else stringResource(R.string.perf_fastpath_hint),
-                prootFastPath && !prootNoSeccomp, enabled = !prootNoSeccomp, onChange = onProotFastPath,
+                when {
+                    nativeUserland -> stringResource(R.string.perf_fastpath_needs_proot)
+                    prootNoSeccomp -> stringResource(R.string.perf_fastpath_needs_seccomp)
+                    else -> stringResource(R.string.perf_fastpath_hint)
+                },
+                prootFastPath && !prootNoSeccomp && !nativeUserland, enabled = !prootNoSeccomp && !nativeUserland,
+                onChange = onProotFastPath,
+            )
+            ToggleRow(
+                host, "nativeuserland", stringResource(R.string.perf_native_userland),
+                stringResource(R.string.perf_native_userland_hint),
+                nativeUserland, onChange = onNativeUserland,
             )
             ToggleRow(
                 host, "cursorcomposite", stringResource(R.string.perf_cursor_composite),
@@ -227,4 +249,12 @@ fun PerformancePage(
             }
         }
     }
+    if (embedded) Column {
+        Text(stringResource(R.string.perf_lede), fontSize = 13.sp, color = colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp))
+        body()
+    } else SettingsPage(
+        host, title = stringResource(R.string.perf_title),
+        lede = stringResource(R.string.perf_lede),
+        onBack = onDismiss,
+    ) { body() }
 }
