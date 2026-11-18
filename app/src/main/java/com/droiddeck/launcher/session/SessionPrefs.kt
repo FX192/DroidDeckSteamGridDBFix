@@ -255,6 +255,18 @@ object SessionPrefs {
         prefs(context).edit().putBoolean("libraryShowSize", show).apply()
     }
 
+    fun libraryShowHidden(context: Context): Boolean = prefs(context).getBoolean("libraryShowHidden", false)
+
+    fun setLibraryShowHidden(context: Context, show: Boolean) {
+        prefs(context).edit().putBoolean("libraryShowHidden", show).apply()
+    }
+
+    fun libraryHidden(context: Context): Set<String> = prefs(context).getStringSet("libraryHidden", null)?.toSet().orEmpty()
+
+    fun setLibraryHidden(context: Context, keys: Set<String>) {
+        prefs(context).edit().putStringSet("libraryHidden", keys.toSet()).apply()
+    }
+
     fun railLabels(context: Context): Boolean = prefs(context).getBoolean("railLabels", false)
 
     fun setRailLabels(context: Context, show: Boolean) {
@@ -306,7 +318,35 @@ object SessionPrefs {
         prefs(context).edit().putStringSet("libraryFavorites", keys.toSet()).apply()
     }
 
+    fun storesTabOrderCustomized(context: Context): Boolean =
+        prefs(context).getBoolean("storesTabOrderCustomized", false)
+
+    fun setStoresTabOrderCustomized(context: Context, customized: Boolean) {
+        prefs(context).edit().putBoolean("storesTabOrderCustomized", customized).apply()
+    }
+
     fun storesTabOrder(context: Context): List<String> = idList(prefs(context).getString("storesTabOrder", null))
+
+    /** An order nobody arranged stays unsaved, so it keeps following the default. */
+    fun saveStoresTabs(context: Context, order: List<String>, hidden: Set<String>, arranged: Boolean) {
+        if (arranged) setStoresTabOrderCustomized(context, true)
+        if (storesTabOrderCustomized(context)) setStoresTabOrder(context, order)
+        setStoresTabHidden(context, hidden)
+    }
+
+    private val LEGACY_STORES_TAB_ORDER = listOf("gog", "epic", "amazon", "xbox", "itch", "gamejolt", "battlenet", "ubisoft", "ea", "rockstar")
+
+    /**
+     * Forgets an order the user never arranged, so the Stores tabs and Library pills follow whatever the default is now.
+     * Earlier versions saved the default of their day, which is why a saved order alone does not mean the user chose it.
+     */
+    fun settleStoresTabOrder(context: Context, defaults: List<String>) {
+        if (storesTabOrderCustomized(context)) return
+        val saved = storesTabOrder(context)
+        if (saved.isEmpty()) return
+        if (saved == LEGACY_STORES_TAB_ORDER || saved == defaults) prefs(context).edit().remove("storesTabOrder").apply()
+        else setStoresTabOrderCustomized(context, true)
+    }
 
     fun setStoresTabOrder(context: Context, order: List<String>) {
         prefs(context).edit().putString("storesTabOrder", order.joinToString(",")).apply()
@@ -1530,7 +1570,7 @@ object SessionPrefs {
     }
 
     val upscalerChoices = listOf(
-        0 to "Linear", 2 to "Nearest", 4 to "AMD FSR 1", 3 to "Snapdragon GSR",
+        2 to "Nearest", 0 to "Linear", 4 to "AMD FSR 1", 3 to "Snapdragon GSR",
         8 to "Snapdragon GSR (quality)", 7 to "NVIDIA NIS", 6 to "Sharpen only",
     )
 
@@ -1545,12 +1585,12 @@ object SessionPrefs {
     fun canonicalUpscaler(mode: Int): Int = when (mode) {
         1 -> 0
         5 -> 4
-        else -> mode.takeIf { m -> upscalerChoices.any { it.first == m } } ?: 0
+        else -> mode.takeIf { m -> upscalerChoices.any { it.first == m } } ?: 2
     }
 
     fun upscalerHasSharpness(mode: Int): Boolean = canonicalUpscaler(mode) in 3..8
 
-    fun upscaler(context: Context): Int = canonicalUpscaler(prefs(context).getInt("upscaler", 0))
+    fun upscaler(context: Context): Int = canonicalUpscaler(prefs(context).getInt("upscaler", 2))
 
     fun setUpscaler(context: Context, mode: Int) {
         prefs(context).edit().putInt("upscaler", canonicalUpscaler(mode)).apply()
